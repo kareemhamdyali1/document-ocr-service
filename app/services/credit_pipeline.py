@@ -942,8 +942,11 @@ class CreditPipeline:
         # Calculated net salary does not have OCR confidence.
         # ----------------------------------------------------
 
+        # FIX: the calculated net salary is derived from the gross salary,
+        # so it inherits the gross salary's OCR confidence instead of 0.0
+        # (a hard 0.0 made the backend gate reject it as LOW_CONFIDENCE).
         if net_salary_is_calculated:
-            net_confidence = 0.0
+            net_confidence = gross_confidence
 
         return {
 
@@ -1019,6 +1022,16 @@ class CreditPipeline:
             )
         )
 
+        # Confidence for fields that are DERIVED from the extracted
+        # transactions (not read directly from the image). They inherit the
+        # overall document quality, never a hard 0.0.
+        # Uses the existing fallback chain: ocr_confidence, then
+        # overall_quality_score (a non-existent field name forces it).
+        doc_quality = self.get_confidence(
+            result,
+            "__derived__",
+        )
+
         # ----------------------------------------------------
         # Resolve statement period.
         #
@@ -1092,8 +1105,13 @@ class CreditPipeline:
                     statement_period_months
                 )
 
-            # Calculated from statement dates.
-            statement_period_confidence = 0.0
+            # FIX: calculated from statement dates -> derived confidence
+            # (document quality) instead of a hard 0.0.
+            statement_period_confidence = (
+                doc_quality
+                if statement_period_months is not None
+                else 0.0
+            )
 
         # ----------------------------------------------------
         # Derived bank metrics
@@ -1131,6 +1149,13 @@ class CreditPipeline:
             "income_regularity_score"
         )
 
+        def derived_confidence(value):
+            return (
+                doc_quality
+                if value is not None
+                else 0.0
+            )
+
         return {
 
             "bank_name": self.make_field(
@@ -1156,45 +1181,45 @@ class CreditPipeline:
                 statement_period_confidence,
             ),
 
-            # These are APPLICATION-DERIVED.
+            # APPLICATION-DERIVED fields: confidence = document quality.
             "avg_monthly_net_inflow": self.make_field(
                 avg_monthly_net_inflow,
-                0.0,
+                derived_confidence(avg_monthly_net_inflow),
             ),
 
             "avg_monthly_balance": self.make_field(
                 avg_monthly_balance,
-                0.0,
+                derived_confidence(avg_monthly_balance),
             ),
 
             "min_monthly_balance": self.make_field(
                 min_monthly_balance,
-                0.0,
+                derived_confidence(min_monthly_balance),
             ),
 
             "max_monthly_balance": self.make_field(
                 max_monthly_balance,
-                0.0,
+                derived_confidence(max_monthly_balance),
             ),
 
             "balance_volatility_std": self.make_field(
                 balance_volatility_std,
-                0.0,
+                derived_confidence(balance_volatility_std),
             ),
 
             "overdraft_frequency": self.make_field(
                 overdraft_frequency,
-                0.0,
+                derived_confidence(overdraft_frequency),
             ),
 
             "returned_cheques_count": self.make_field(
                 returned_cheques_count,
-                0.0,
+                derived_confidence(returned_cheques_count),
             ),
 
             "income_regularity_score": self.make_field(
                 income_regularity_score,
-                0.0,
+                derived_confidence(income_regularity_score),
             ),
         }
 
